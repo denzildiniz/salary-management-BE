@@ -102,11 +102,19 @@ function getRoleMultiplier(title: string): number {
   return 0.9;
 }
 
-export async function runSeed() {
-  console.log('Starting data seeding...');
+export async function runSeed(force = false) {
   await initDb();
   const db = await getDb();
 
+  if (!force) {
+    const row = await db.get<{ count: number }>('SELECT COUNT(*) as count FROM employees');
+    if (row && row.count > 0) {
+      console.log(`Database already has ${row.count} employees — skipping seed.`);
+      return;
+    }
+  }
+
+  console.log('Starting data seeding...');
   await db.run('DELETE FROM employees;');
   console.log('Cleared existing employee data.');
 

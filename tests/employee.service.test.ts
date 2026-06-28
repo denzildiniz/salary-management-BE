@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
-import type { Database } from 'sqlite';
+import type { AsyncDatabase } from '../src/db';
 import { createTestDb, teardownTestDb } from './helpers/testDb';
 import {
   listEmployees,

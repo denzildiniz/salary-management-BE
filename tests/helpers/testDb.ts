@@ -1,12 +1,10 @@
-import { open, Database } from 'sqlite';
-import sqlite3 from 'sqlite3';
-import { setTestDb, clearTestDb } from '../../src/db';
+import { DatabaseSync } from 'node:sqlite';
+import { AsyncDatabase, setTestDb, clearTestDb } from '../../src/db';
 
-export async function createTestDb(): Promise<Database> {
-  const db = await open({ filename: ':memory:', driver: sqlite3.Database });
+export async function createTestDb(): Promise<AsyncDatabase> {
+  const rawDb = new DatabaseSync(':memory:');
 
-  await db.exec('PRAGMA journal_mode = WAL;');
-  await db.exec(`
+  rawDb.exec(`
     CREATE TABLE IF NOT EXISTS employees (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       employee_id TEXT UNIQUE NOT NULL,
@@ -29,6 +27,7 @@ export async function createTestDb(): Promise<Database> {
     CREATE INDEX IF NOT EXISTS idx_employees_names ON employees(first_name, last_name);
   `);
 
+  const db = new AsyncDatabase(rawDb);
   setTestDb(db);
   return db;
 }

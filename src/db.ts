@@ -1,15 +1,70 @@
 import fs from 'fs';
 import path from 'path';
-import { open, Database } from 'sqlite';
-import sqlite3 from 'sqlite3';
+import { DatabaseSync } from 'node:sqlite';
 
 const DB_DIR = path.join(__dirname, '..', 'data');
 const DB_FILE = path.join(DB_DIR, 'acme_payroll.db');
 
-let dbInstance: Database | null = null;
+// Thin async wrapper that preserves the existing sqlite-package API surface
+// so no changes are needed in service files or controllers.
+class AsyncStatement {
+  constructor(private stmt: ReturnType<DatabaseSync['prepare']>) {}
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  async run(...params: any[]): Promise<{ lastID?: number; changes?: number }> {
+    const result = this.stmt.run(...params);
+    return { lastID: Number(result.lastInsertRowid), changes: result.changes };
+  }
+
+  async finalize(): Promise<void> {
+    // node:sqlite finalizes statements automatically — kept for API compatibility
+  }
+}
+
+export class AsyncDatabase {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  constructor(private db: any) {}
+
+  async exec(sql: string): Promise<void> {
+    this.db.exec(sql);
+  }
+
+  async prepare(sql: string): Promise<AsyncStatement> {
+    return new AsyncStatement(this.db.prepare(sql));
+  }
+
+  async get<T = Record<string, unknown>>(sql: string, params?: unknown[]): Promise<T | undefined> {
+    const stmt = this.db.prepare(sql);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const row = params && params.length > 0 ? stmt.get(...(params as any[])) : stmt.get();
+    return row as T | undefined;
+  }
+
+  async all<T = unknown[]>(sql: string, params?: unknown[]): Promise<T> {
+    const stmt = this.db.prepare(sql);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const rows = params && params.length > 0 ? stmt.all(...(params as any[])) : stmt.all();
+    return rows as T;
+  }
+
+  async run(sql: string, params?: unknown[]): Promise<{ lastID?: number; changes?: number }> {
+    // Transaction control statements cannot be prepared — execute directly
+    const upper = sql.trim().toUpperCase().replace(/;$/, '').trim();
+    if (upper === 'BEGIN TRANSACTION' || upper === 'BEGIN' || upper === 'COMMIT' || upper === 'ROLLBACK') {
+      this.db.exec(sql);
+      return {};
+    }
+    const stmt = this.db.prepare(sql);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const result = params && params.length > 0 ? stmt.run(...(params as any[])) : stmt.run();
+    return { lastID: Number(result.lastInsertRowid), changes: result.changes };
+  }
+}
+
+let dbInstance: AsyncDatabase | null = null;
 
 /** Test-only: inject an in-memory database so service tests never touch the real file. */
-export function setTestDb(db: Database): void {
+export function setTestDb(db: AsyncDatabase): void {
   dbInstance = db;
 }
 
@@ -18,32 +73,23 @@ export function clearTestDb(): void {
   dbInstance = null;
 }
 
-export async function getDb(): Promise<Database> {
-  if (dbInstance) {
-    return dbInstance;
-  }
+export async function getDb(): Promise<AsyncDatabase> {
+  if (dbInstance) return dbInstance;
 
-  // Ensure database directory exists
   if (!fs.existsSync(DB_DIR)) {
     fs.mkdirSync(DB_DIR, { recursive: true });
   }
 
-  // Open the SQLite database
-  dbInstance = await open({
-    filename: DB_FILE,
-    driver: sqlite3.Database,
-  });
+  const rawDb = new DatabaseSync(DB_FILE);
+  rawDb.exec('PRAGMA journal_mode = WAL;');
 
-  // Enable WAL mode for better concurrency and write speeds
-  await dbInstance.exec('PRAGMA journal_mode = WAL;');
-
+  dbInstance = new AsyncDatabase(rawDb);
   return dbInstance;
 }
 
 export async function initDb(): Promise<void> {
   const db = await getDb();
 
-  // Create employees table if it does not exist
   await db.exec(`
     CREATE TABLE IF NOT EXISTS employees (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -63,7 +109,6 @@ export async function initDb(): Promise<void> {
     );
   `);
 
-  // Create indexes for high-speed search and filtering
   await db.exec(`
     CREATE INDEX IF NOT EXISTS idx_employees_department ON employees(department);
     CREATE INDEX IF NOT EXISTS idx_employees_country ON employees(country);

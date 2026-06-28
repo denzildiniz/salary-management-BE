@@ -13,7 +13,7 @@ class AsyncStatement {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async run(...params: any[]): Promise<{ lastID?: number; changes?: number }> {
     const result = this.stmt.run(...params);
-    return { lastID: Number(result.lastInsertRowid), changes: result.changes };
+    return { lastID: Number(result.lastInsertRowid), changes: Number(result.changes) };
   }
 
   async finalize(): Promise<void> {
@@ -33,14 +33,16 @@ export class AsyncDatabase {
     return new AsyncStatement(this.db.prepare(sql));
   }
 
-  async get<T = Record<string, unknown>>(sql: string, params?: unknown[]): Promise<T | undefined> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  async get<T = any>(sql: string, params?: unknown[]): Promise<T | undefined> {
     const stmt = this.db.prepare(sql);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const row = params && params.length > 0 ? stmt.get(...(params as any[])) : stmt.get();
     return row as T | undefined;
   }
 
-  async all<T = unknown[]>(sql: string, params?: unknown[]): Promise<T> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  async all<T = any[]>(sql: string, params?: unknown[]): Promise<T> {
     const stmt = this.db.prepare(sql);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const rows = params && params.length > 0 ? stmt.all(...(params as any[])) : stmt.all();
@@ -57,7 +59,7 @@ export class AsyncDatabase {
     const stmt = this.db.prepare(sql);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const result = params && params.length > 0 ? stmt.run(...(params as any[])) : stmt.run();
-    return { lastID: Number(result.lastInsertRowid), changes: result.changes };
+    return { lastID: Number(result.lastInsertRowid), changes: Number(result.changes) };
   }
 }
 
